@@ -149,7 +149,7 @@ class WebAppState:
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         session = {
             "id": uuid.uuid4().hex[:12],
-            "title": Path(directory).name if directory else "New Session",
+            "title": Path(directory).name if directory else "新会话",
             "directory": directory,
             "wing": wing,
             "created_at": created_at,
@@ -177,7 +177,7 @@ class WebAppState:
         session = self.ensure_session()
         session.setdefault("messages", []).append(message)
         session["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if message.get("question") and session.get("title") in ("New Session", Path(session.get("directory", "")).name):
+        if message.get("question") and session.get("title") in ("新会话", Path(session.get("directory", "")).name):
             session["title"] = message["question"][:40]
         self.chat_history = session["messages"]
         self.save_chat_history()
@@ -223,7 +223,7 @@ def _capture_output(fn, *args, **kwargs):
 def index_directory(directory: str) -> str:
     target = Path(directory).expanduser().resolve()
     if not target.exists() or not target.is_dir():
-        raise ValueError(f"Directory not found: {target}")
+        raise ValueError(f"未找到目录：{target}")
 
     files = scan_for_detection(str(target))
     if files:
@@ -266,7 +266,7 @@ def choose_directory_dialog(initial_dir: str = "") -> str:
     try:
         selected = filedialog.askdirectory(
             initialdir=initial_dir or str(Path.home()),
-            title="Choose A Directory For MemPalace",
+            title="选择知识库目录",
             mustexist=True,
         )
     finally:
@@ -432,10 +432,10 @@ def _render_status_panel() -> str:
     status_text = STATE.last_error or STATE.last_status
     return f"""
     <section class="card {status_class}">
-      <h2>Status</h2>
+      <h2>状态</h2>
       <pre>{html.escape(status_text)}</pre>
-      <h3>Logs</h3>
-      <pre>{html.escape(STATE.last_logs or "No logs yet")}</pre>
+      <h3>日志</h3>
+      <pre>{html.escape(STATE.last_logs or "暂无日志")}</pre>
     </section>
     """
 
@@ -444,8 +444,8 @@ def _render_chat_history() -> str:
     if not STATE.chat_history:
         return """
         <section class="empty-chat">
-          <h2>No messages yet</h2>
-          <p>Open Settings first, choose a directory and model, then come back here to ask questions.</p>
+          <h2>还没有消息</h2>
+          <p>先在设置页选择目录并配置模型，再回来开始提问。</p>
         </section>
         """
 
@@ -453,18 +453,18 @@ def _render_chat_history() -> str:
     for item in STATE.chat_history:
         user = f"""
         <article class="bubble user-bubble">
-          <div class="bubble-role">You</div>
+          <div class="bubble-role">你</div>
           <div class="bubble-time">{_escape(item.get('created_at', ''))}</div>
           <div class="bubble-text">{html.escape(item['question'])}</div>
         </article>
         """
         assistant = f"""
         <article class="bubble assistant-bubble">
-          <div class="bubble-role">Assistant</div>
+          <div class="bubble-role">助手</div>
           <div class="bubble-time">{_escape(item.get('created_at', ''))}</div>
           <div class="markdown-body">{render_markdown(item['answer'])}</div>
           <details class="details-panel">
-            <summary>Retrieved Results</summary>
+            <summary>检索结果</summary>
             {render_hits(item["hits"])}
           </details>
         </article>
@@ -477,8 +477,8 @@ def _render_session_list() -> str:
     items = []
     for session in STATE.chat_sessions:
         active = "session-link active" if session["id"] == STATE.current_session_id else "session-link"
-        title = session.get("title") or "Untitled"
-        subtitle = session.get("directory") or "No directory"
+        title = session.get("title") or "未命名会话"
+        subtitle = session.get("directory") or "未绑定目录"
         items.append(
             f"""
             <div class="session-row">
@@ -492,7 +492,7 @@ def _render_session_list() -> str:
               </form>
               <form method="post" action="/delete-session" class="session-delete-form">
                 <input type="hidden" name="session_id" value="{_escape(session['id'])}">
-                <button type="submit" class="session-delete" title="Delete session">×</button>
+                <button type="submit" class="session-delete" title="删除会话">×</button>
               </form>
             </div>
             """
@@ -501,20 +501,20 @@ def _render_session_list() -> str:
 
 
 def _render_chat_page() -> str:
-    settings_hint = "ready" if STATE.current_dir and STATE.model_name else "incomplete"
+    settings_hint = "已完成" if STATE.current_dir and STATE.model_name else "未完成"
     return f"""
     <div class="meta chat-meta">
-      <span>Directory: {_escape(STATE.current_dir or "none")}</span>
-      <span>Wing: {_escape(STATE.current_wing or "none")}</span>
-      <span>Model: {_escape(STATE.model_name or "none")}</span>
-      <span>Setup: {_escape(settings_hint)}</span>
-      <span>History turns: {_escape(str(STATE.max_history_turns))}</span>
+      <span>目录：{_escape(STATE.current_dir or "未设置")}</span>
+      <span>分区：{_escape(STATE.current_wing or "未设置")}</span>
+      <span>模型：{_escape(STATE.model_name or "未设置")}</span>
+      <span>配置：{_escape(settings_hint)}</span>
+      <span>记忆轮数：{_escape(str(STATE.max_history_turns))}</span>
     </div>
 
     <section class="workspace">
       <aside class="session-sidebar card" id="session-sidebar">
         <div class="session-sidebar-head">
-          <h2>Sessions</h2>
+          <h2>Session</h2>
           <form method="post" action="/new-session">
             <button type="submit">New</button>
           </form>
@@ -526,7 +526,7 @@ def _render_chat_page() -> str:
 
       <section class="chat-shell">
         <div class="chat-topbar">
-          <button type="button" class="sidebar-toggle" id="sidebar-toggle">Sessions</button>
+          <button type="button" class="sidebar-toggle" id="sidebar-toggle">Session</button>
         </div>
         <section class="chat-stream" id="chat-stream">
           {_render_chat_history()}
@@ -541,8 +541,8 @@ def _render_chat_page() -> str:
             rows="1"
           >{_escape(STATE.last_question)}</textarea>
           <div class="composer-actions">
-            <a class="clear-link" href="/clear-chat">Clear Chat</a>
-            <button type="submit" id="send-button">Send</button>
+            <a class="clear-link" href="/clear-chat">清空聊天</a>
+            <button type="submit" id="send-button">发送</button>
           </div>
         </form>
       </section>
@@ -553,93 +553,93 @@ def _render_chat_page() -> str:
 
 def _render_settings_page() -> str:
     index_status = get_directory_index_status(STATE.current_wing)
-    indexed_label = "indexed" if index_status["exists"] else "not indexed"
+    indexed_label = "已索引" if index_status["exists"] else "未索引"
     return f"""
     <section class="hero settings-hero">
       <div>
-        <h1>Settings</h1>
-        <p>Configure the directory, indexing lifecycle, and model endpoint here. The chat page uses only what is defined in these sections.</p>
+        <h1>设置</h1>
+        <p>在这里配置目录、索引和模型，聊天页会直接使用这些设置。</p>
       </div>
       <div class="meta settings-meta">
-        <span>Palace: {_escape(STATE.palace_path)}</span>
-        <span>Directory: {_escape(STATE.current_dir or "none")}</span>
-        <span>Model: {_escape(STATE.model_name or "none")}</span>
-        <span>Index: {_escape(indexed_label)}</span>
+        <span>仓库：{_escape(STATE.palace_path)}</span>
+        <span>目录：{_escape(STATE.current_dir or "未设置")}</span>
+        <span>模型：{_escape(STATE.model_name or "未设置")}</span>
+        <span>索引：{_escape(indexed_label)}</span>
       </div>
     </section>
 
     <section class="settings-stack">
       <section class="settings-section light-section">
         <div class="section-copy">
-          <h2>Directory</h2>
-          <p>Pick the active knowledge source, inspect index coverage, and rebuild or clear the current directory when needed.</p>
+          <h2>目录</h2>
+          <p>选择当前知识库目录，查看索引情况，并在需要时重新建库或清空索引。</p>
         </div>
         <div class="settings-panel">
           <div class="stat-row">
             <div class="stat-chip">
-              <span class="stat-label">Drawers</span>
+              <span class="stat-label">抽屉数</span>
               <strong>{_escape(str(index_status["drawers"]))}</strong>
             </div>
             <div class="stat-chip">
-              <span class="stat-label">Files</span>
+              <span class="stat-label">文件数</span>
               <strong>{_escape(str(index_status["files"]))}</strong>
             </div>
           </div>
           <form method="post" action="/browse-directory">
-            <button type="submit">Browse Folder</button>
+            <button type="submit">选择目录</button>
           </form>
           <form method="post" action="/index">
             <label>
-              Local directory path
-              <input type="text" name="directory" value="{_escape(STATE.current_dir)}" placeholder="E:\\docs or C:\\work\\project">
+              本地目录
+              <input type="text" name="directory" value="{_escape(STATE.current_dir)}" placeholder="例如：E:\\docs 或 C:\\work\\project">
             </label>
-            <button class="secondary" type="submit">Initialize And Mine</button>
+            <button class="secondary" type="submit">初始化并导入</button>
           </form>
           <form method="post" action="/clear-index">
-            <button type="submit">Clear Current Directory Index</button>
+            <button type="submit">清空当前目录索引</button>
           </form>
         </div>
       </section>
 
       <section class="settings-section dark-section">
         <div class="section-copy">
-          <h2>Model</h2>
-          <p>Use any OpenAI-compatible endpoint. Keep the interface restrained and reserve the blue accent for the actions that matter.</p>
+          <h2>模型</h2>
+          <p>支持任意 OpenAI-compatible 接口。这里只保留必要配置，问答时直接调用。</p>
         </div>
         <div class="settings-panel dark-panel">
           <form method="post" action="/settings">
             <label>
-              Base URL
+              接口地址
               <input type="text" name="base_url" value="{_escape(STATE.model_base_url)}" placeholder="http://127.0.0.1:11434">
             </label>
             <label>
-              API key
-              <input type="text" name="api_key" value="{_escape(STATE.model_api_key)}" placeholder="Leave empty for local models">
+              API Key
+              <input type="text" name="api_key" value="{_escape(STATE.model_api_key)}" placeholder="本地模型可留空">
             </label>
             <label>
-              Model
+              模型名
               <input type="text" name="model" value="{_escape(STATE.model_name)}" placeholder="qwen2.5:7b-instruct or gpt-4o-mini">
             </label>
             <label>
-              Retrieval top K
+              检索条数
               <input type="number" name="retrieval_k" min="1" max="20" value="{_escape(str(STATE.retrieval_k))}">
             </label>
             <label>
-              Chat memory turns
+              记忆轮数
               <input type="number" name="max_history_turns" min="0" max="12" value="{_escape(str(STATE.max_history_turns))}">
             </label>
-            <button type="submit">Save Settings</button>
+            <button type="submit">保存设置</button>
           </form>
           <form method="post" action="/test-model">
-            <button class="ghost-light" type="submit">Test Model Connection</button>
+            <button class="ghost-light" type="submit">测试模型连接</button>
           </form>
         </div>
       </section>
 
       <section class="settings-section light-section">
         <div class="section-copy">
-          <h2>Status</h2>
-          <p>Operational feedback stays here so the chat surface remains clean and focused.</p>
+          <h2>状态</h2>
+          <p>运行状态和日志都放在这里，聊天页保持简洁。</p>
         </div>
         <div class="settings-panel">
           {_render_status_panel()}
@@ -715,8 +715,8 @@ def render_page(tab: str = "chat") -> str:
             const userBubble = document.createElement("article");
             userBubble.className = "bubble user-bubble";
             userBubble.innerHTML =
-              '<div class="bubble-role">You</div>' +
-              '<div class="bubble-time">just now</div>' +
+              '<div class="bubble-role">你</div>' +
+              '<div class="bubble-time">刚刚</div>' +
               '<div class="bubble-text"></div>';
             userBubble.querySelector(".bubble-text").textContent = question;
             stream.appendChild(userBubble);
@@ -724,9 +724,9 @@ def render_page(tab: str = "chat") -> str:
             assistantBubble = document.createElement("article");
             assistantBubble.className = "bubble assistant-bubble";
             assistantBubble.innerHTML =
-              '<div class="bubble-role">Assistant</div>' +
-              '<div class="bubble-time">just now</div>' +
-              '<div class="thinking">Assistant is thinking...</div>' +
+              '<div class="bubble-role">助手</div>' +
+              '<div class="bubble-time">刚刚</div>' +
+              '<div class="thinking">正在思考...</div>' +
               '<div class="markdown-body" style="display:none;"></div>';
             assistantContent = assistantBubble.querySelector(".markdown-body");
             stream.appendChild(assistantBubble);
@@ -736,7 +736,7 @@ def render_page(tab: str = "chat") -> str:
           input.setAttribute("disabled", "disabled");
           button.setAttribute("disabled", "disabled");
           button.classList.add("loading");
-          button.textContent = "Waiting...";
+          button.textContent = "请稍候...";
           input.value = "";
           autoGrow();
 
@@ -787,7 +787,7 @@ def render_page(tab: str = "chat") -> str:
                   if (payload.hits_html) {
                     const details = document.createElement("details");
                     details.className = "details-panel";
-                    details.innerHTML = "<summary>Retrieved Results</summary>" + payload.hits_html;
+                    details.innerHTML = "<summary>检索结果</summary>" + payload.hits_html;
                     assistantBubble.appendChild(details);
                   }
                   const timeNode = assistantBubble.querySelector(".bubble-time");
@@ -805,13 +805,13 @@ def render_page(tab: str = "chat") -> str:
               const thinking = assistantBubble.querySelector(".thinking");
               if (thinking) thinking.remove();
               assistantContent.style.display = "block";
-              assistantContent.textContent = "Error: " + error.message;
+              assistantContent.textContent = "出错了：" + error.message;
             }
           } finally {
             input.removeAttribute("disabled");
             button.removeAttribute("disabled");
             button.classList.remove("loading");
-            button.textContent = "Send";
+            button.textContent = "发送";
             input.focus();
           }
         });
@@ -820,11 +820,11 @@ def render_page(tab: str = "chat") -> str:
   </script>"""
 
     return f"""<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MemPalace Local QA</title>
+  <title>MemPalace 本地知识问答</title>
   <style>
     :root {{
       --bg: #f5f5f7;
@@ -1424,8 +1424,8 @@ def render_page(tab: str = "chat") -> str:
     <header class="topbar">
       <div class="brand">MemPalace Local QA</div>
       <nav class="nav">
-        <a class="{chat_active}" href="/">Chat</a>
-        <a class="{settings_active}" href="/settings-page">Settings</a>
+        <a class="{chat_active}" href="/">聊天</a>
+        <a class="{settings_active}" href="/settings-page">设置</a>
       </nav>
     </header>
 
@@ -1446,7 +1446,7 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/session/"):
             session_id = self.path.rsplit("/", 1)[-1]
             if STATE.switch_session(session_id):
-                STATE.last_status = f"Opened session: {STATE.get_current_session().get('title', session_id)}"
+                STATE.last_status = f"已打开会话：{STATE.get_current_session().get('title', session_id)}"
                 STATE.clear_error()
                 self._redirect("/")
                 return
@@ -1463,7 +1463,7 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/clear-chat":
             reset_chat_state()
-            STATE.last_status = "Chat history cleared."
+            STATE.last_status = "聊天记录已清空。"
             STATE.clear_error()
             self._redirect("/")
             return
@@ -1481,11 +1481,11 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
             if self.path == "/delete-session":
                 session_id = (form.get("session_id") or [""])[0].strip()
                 if not session_id:
-                    raise ValueError("Missing session id.")
+                    raise ValueError("缺少会话 ID。")
                 if not STATE.delete_session(session_id):
-                    raise ValueError("Session not found.")
+                    raise ValueError("未找到会话。")
                 session = STATE.get_current_session()
-                STATE.last_status = f"Deleted session. Current session: {session.get('title', 'New Session')}"
+                STATE.last_status = f"会话已删除，当前会话：{session.get('title', '新会话')}"
                 STATE.last_logs = ""
                 STATE.clear_error()
                 self._redirect("/")
@@ -1493,25 +1493,25 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
             if self.path == "/switch-session":
                 session_id = (form.get("session_id") or [""])[0].strip()
                 if not session_id:
-                    raise ValueError("Missing session id.")
+                    raise ValueError("缺少会话 ID。")
                 if not STATE.switch_session(session_id):
-                    raise ValueError("Session not found.")
+                    raise ValueError("未找到会话。")
                 session = STATE.get_current_session()
-                STATE.last_status = f"Opened session: {session.get('title', session_id)}"
+                STATE.last_status = f"已打开会话：{session.get('title', session_id)}"
                 STATE.last_logs = ""
                 STATE.clear_error()
                 self._redirect("/")
                 return
             if self.path == "/new-session":
                 session = STATE.create_session(directory=STATE.current_dir, wing=STATE.current_wing)
-                STATE.last_status = f"Created new session: {session['title']}"
+                STATE.last_status = f"已新建会话：{session['title']}"
                 STATE.clear_error()
                 self._redirect("/")
                 return
             if self.path == "/index":
                 directory = (form.get("directory") or [""])[0].strip()
                 if not directory:
-                    raise ValueError("Please provide a directory path.")
+                    raise ValueError("请填写目录路径。")
                 previous_wing = STATE.current_wing
                 STATE.current_dir = directory
                 STATE.current_wing = directory_to_wing(directory)
@@ -1520,11 +1520,11 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
                 session = STATE.ensure_session()
                 session["directory"] = STATE.current_dir
                 session["wing"] = STATE.current_wing
-                if session.get("title") == "New Session":
-                    session["title"] = Path(STATE.current_dir).name or "New Session"
+                if session.get("title") == "新会话":
+                    session["title"] = Path(STATE.current_dir).name or "新会话"
                 session["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 STATE.save_chat_history()
-                STATE.last_status = f"Indexed directory: {Path(directory).expanduser().resolve()}"
+                STATE.last_status = f"已完成索引：{Path(directory).expanduser().resolve()}"
                 STATE.last_logs = index_directory(directory)
                 STATE.clear_error()
                 self._redirect("/settings-page")
@@ -1541,10 +1541,10 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
                     session["directory"] = STATE.current_dir
                     session["wing"] = STATE.current_wing
                     session["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    if session.get("title") == "New Session":
-                        session["title"] = Path(STATE.current_dir).name or "New Session"
+                    if session.get("title") == "新会话":
+                        session["title"] = Path(STATE.current_dir).name or "新会话"
                     STATE.save_chat_history()
-                    STATE.last_status = f"Selected directory: {selected}"
+                    STATE.last_status = f"已选择目录：{selected}"
                     STATE.clear_error()
                 self._redirect("/settings-page")
                 return
@@ -1557,38 +1557,38 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
                 history_raw = (form.get("max_history_turns") or [str(STATE.max_history_turns)])[0].strip()
                 STATE.max_history_turns = max(0, min(12, int(history_raw or "4")))
                 STATE.save_settings()
-                STATE.last_status = "Model settings saved."
+                STATE.last_status = "模型设置已保存。"
                 STATE.clear_error()
                 self._redirect("/settings-page")
                 return
             elif self.path == "/test-model":
                 if not STATE.model_base_url:
-                    raise ValueError("Configure the model base URL first.")
+                    raise ValueError("请先配置模型接口地址。")
                 models = list_models(
                     base_url=STATE.model_base_url,
                     api_key=STATE.model_api_key,
                 )
                 if STATE.model_name:
                     if STATE.model_name in models:
-                        STATE.last_status = f"Model connection ok. Found configured model: {STATE.model_name}"
+                        STATE.last_status = f"模型连接正常，已找到配置的模型：{STATE.model_name}"
                     else:
-                        preview = ", ".join(models[:10]) if models else "none"
+                        preview = ", ".join(models[:10]) if models else "无"
                         STATE.last_status = (
-                            f"Connection ok, but configured model '{STATE.model_name}' was not found. "
-                            f"Available models: {preview}"
+                            f"连接正常，但未找到已配置的模型“{STATE.model_name}”。"
+                            f"可用模型：{preview}"
                         )
                 else:
-                    preview = ", ".join(models[:10]) if models else "none"
-                    STATE.last_status = f"Connection ok. Available models: {preview}"
+                    preview = ", ".join(models[:10]) if models else "无"
+                    STATE.last_status = f"连接正常。可用模型：{preview}"
                 STATE.last_logs = ""
                 STATE.clear_error()
                 self._redirect("/settings-page")
                 return
             elif self.path == "/clear-index":
                 if not STATE.current_wing:
-                    raise ValueError("Choose a directory first.")
+                    raise ValueError("请先选择目录。")
                 deleted = clear_directory_index(STATE.current_wing)
-                STATE.last_status = f"Cleared {deleted} drawers from wing: {STATE.current_wing}"
+                STATE.last_status = f"已从分区 {STATE.current_wing} 清空 {deleted} 个抽屉。"
                 STATE.last_logs = ""
                 STATE.clear_error()
                 self._redirect("/settings-page")
@@ -1611,13 +1611,13 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
     def _handle_api_ask(self, form):
         question = (form.get("question") or [""])[0].strip()
         if not question:
-            self._send_json({"error": "Please provide a question."}, status=400)
+            self._send_json({"error": "请输入问题。"}, status=400)
             return
         if not STATE.current_dir:
-            self._send_json({"error": "Index a directory first."}, status=400)
+            self._send_json({"error": "请先为目录建立索引。"}, status=400)
             return
         if not STATE.model_name:
-            self._send_json({"error": "Configure a model first."}, status=400)
+            self._send_json({"error": "请先配置模型。"}, status=400)
             return
 
         result = ask_memories(
