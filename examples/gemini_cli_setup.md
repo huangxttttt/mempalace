@@ -16,11 +16,8 @@ On many Linux systems, installing Python packages globally is restricted. We rec
 git clone https://github.com/milla-jovovich/mempalace.git
 cd mempalace
 
-# Create a virtual environment
-python3 -m venv .venv
-
-# Install dependencies and MemPalace in editable mode
-.venv/bin/pip install -e .
+# Sync dependencies and install MemPalace in editable mode
+uv sync
 ```
 
 ## 2. Initialization
@@ -29,7 +26,7 @@ Set up your "Palace" (the database) and configure your identity.
 
 ```bash
 # Initialize the palace in the current directory
-.venv/bin/python3 -m mempalace init .
+uv run mempalace init .
 ```
 
 ### Identity and Wings (Optional but Recommended)
@@ -43,9 +40,9 @@ You can manually define who you are and what projects you work on by creating/ed
 Register MemPalace as an MCP server so Gemini CLI can use its tools.
 
 ```bash
-gemini mcp add mempalace /absolute/path/to/mempalace/.venv/bin/python3 -m mempalace.mcp_server --scope user
+gemini mcp add mempalace /absolute/path/to/mempalace/.venv/Scripts/python.exe -m mempalace.mcp_server --scope user
 ```
-*Note: Use the absolute path to ensure it works from any directory.*
+*Note: after `uv sync`, use the absolute interpreter path inside `.venv` so it works from any directory. On macOS/Linux the path is `.venv/bin/python`, on Windows it is `.venv/Scripts/python.exe`.*
 
 ## 4. Enable Auto-Saving (Hooks)
 

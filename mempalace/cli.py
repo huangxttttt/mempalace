@@ -112,6 +112,45 @@ def cmd_search(args):
         sys.exit(1)
 
 
+def cmd_ask(args):
+    from .answerer import ask_memories
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    result = ask_memories(
+        question=args.question,
+        palace_path=palace_path,
+        wing=args.wing,
+        room=args.room,
+        n_results=args.results,
+    )
+
+    if "error" in result:
+        print(f"\n  {result['error']}")
+        if "hint" in result:
+            print(f"  {result['hint']}")
+        sys.exit(1)
+
+    if not result.get("answer"):
+        print(f'\n  No answer found for: "{args.question}"')
+        return
+
+    print(f"\n{'=' * 60}")
+    print(f'  Answer for: "{args.question}"')
+    if args.wing:
+        print(f"  Wing: {args.wing}")
+    if args.room:
+        print(f"  Room: {args.room}")
+    print(f"{'=' * 60}\n")
+    print(result["answer"])
+    print("\nSources:")
+    for idx, citation in enumerate(result["citations"], 1):
+        print(
+            f"  [{idx}] {citation['wing']} / {citation['room']} / {citation['source_file']} "
+            f"(match {citation['similarity']})"
+        )
+    print()
+
+
 def cmd_wakeup(args):
     """Show L0 (identity) + L1 (essential story) — the wake-up context."""
     from .layers import MemoryStack
@@ -238,6 +277,12 @@ def cmd_instructions(args):
     from .instructions_cli import run_instructions
 
     run_instructions(name=args.name)
+
+
+def cmd_web(args):
+    from .webapp import serve_web
+
+    serve_web(host=args.host, port=args.port)
 
 
 def cmd_compress(args):
@@ -426,6 +471,16 @@ def main():
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
 
+    # ask
+    p_ask = sub.add_parser(
+        "ask",
+        help="Answer a question from local memories using retrieved passages",
+    )
+    p_ask.add_argument("question", help="Question to answer")
+    p_ask.add_argument("--wing", default=None, help="Limit to one project")
+    p_ask.add_argument("--room", default=None, help="Limit to one room")
+    p_ask.add_argument("--results", type=int, default=5, help="Number of search results to use")
+
     # compress
     p_compress = sub.add_parser(
         "compress", help="Compress drawers using AAAK Dialect (~30x reduction)"
@@ -500,6 +555,14 @@ def main():
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
     )
 
+    # web
+    p_web = sub.add_parser(
+        "web",
+        help="Start a local web UI for indexing a directory and asking questions",
+    )
+    p_web.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    p_web.add_argument("--port", type=int, default=8765, help="Port to bind (default: 8765)")
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -531,9 +594,11 @@ def main():
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "ask": cmd_ask,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "web": cmd_web,
         "status": cmd_status,
     }
     dispatch[args.command](args)

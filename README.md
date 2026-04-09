@@ -87,21 +87,23 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 ## Quick Start
 
 ```bash
-pip install mempalace
+uv tool install mempalace
+# or, for local development in this repo:
+uv sync
 
 # Set up your world — who you work with, what your projects are
-mempalace init ~/projects/myapp
+uv run mempalace init ~/projects/myapp
 
 # Mine your data
-mempalace mine ~/projects/myapp                    # projects — code, docs, notes
-mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack exports
-mempalace mine ~/chats/ --mode convos --extract general  # general — classifies into decisions, milestones, problems
+uv run mempalace mine ~/projects/myapp                    # projects — code, docs, notes
+uv run mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack exports
+uv run mempalace mine ~/chats/ --mode convos --extract general  # general — classifies into decisions, milestones, problems
 
 # Search anything you've ever discussed
-mempalace search "why did we switch to GraphQL"
+uv run mempalace search "why did we switch to GraphQL"
 
 # Your AI remembers
-mempalace status
+uv run mempalace status
 ```
 
 Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Everything stays on your machine.
@@ -127,7 +129,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 
 ```bash
 # Connect MemPalace once
-claude mcp add mempalace -- python -m mempalace.mcp_server
+claude mcp add mempalace -- uv run python -m mempalace.mcp_server
 ```
 
 Now your AI has 19 tools available through MCP. Ask it anything:
@@ -145,7 +147,7 @@ Local models generally don't speak MCP yet. Two approaches:
 **1. Wake-up command** — load your world into the model's context:
 
 ```bash
-mempalace wake-up > context.txt
+uv run mempalace wake-up > context.txt
 # Paste context.txt into your local model's system prompt
 ```
 
@@ -154,7 +156,7 @@ This gives your local model ~170 tokens of critical facts (in AAAK if you prefer
 **2. CLI search** — query on demand, feed results into your prompt:
 
 ```bash
-mempalace search "auth decisions" > results.txt
+uv run mempalace search "auth decisions" > results.txt
 # Include results.txt in your prompt
 ```
 
@@ -455,7 +457,7 @@ claude plugin marketplace add milla-jovovich/mempalace
 claude plugin install --scope user mempalace
 
 # Or manually
-claude mcp add mempalace -- python -m mempalace.mcp_server
+claude mcp add mempalace -- uv run python -m mempalace.mcp_server
 ```
 
 ### 19 Tools
@@ -693,7 +695,7 @@ mempalace/
 No API key. No internet after install. Everything local.
 
 ```bash
-pip install mempalace
+uv tool install mempalace
 ```
 
 ---
