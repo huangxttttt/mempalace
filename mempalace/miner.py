@@ -11,15 +11,25 @@ import os
 import sys
 import hashlib
 import fnmatch
+import zipfile
+import html
+import re
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from email import policy
+from email.parser import BytesParser
+from xml.etree import ElementTree as ET
 
 import chromadb
 
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
+    ".doc",
+    ".docx",
+    ".eml",
+    ".pdf",
     ".py",
     ".js",
     ".ts",
@@ -78,6 +88,8 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+
+DOCX_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
 
 # =============================================================================
@@ -388,6 +400,219 @@ def chunk_text(content: str, source_file: str) -> list:
     return chunks
 
 
+def read_supported_text(filepath: Path) -> str:
+    """Read a supported file type into plain text."""
+    suffix = filepath.suffix.lower()
+    if suffix == ".docx":
+        return _read_docx_text(filepath)
+    if suffix == ".pdf":
+        return _read_pdf_text(filepath)
+    if suffix == ".doc":
+        return _read_doc_text(filepath)
+    if suffix == ".eml":
+        return _read_eml_text(filepath)
+    return filepath.read_text(encoding="utf-8", errors="replace")
+
+
+def _read_docx_text(filepath: Path) -> str:
+    """Extract visible paragraph text from a .docx file using only the stdlib."""
+    try:
+        with zipfile.ZipFile(filepath) as archive:
+            xml_bytes = archive.read("word/document.xml")
+    except (OSError, KeyError, zipfile.BadZipFile) as exc:
+        raise OSError(f"Could not read DOCX {filepath}: {exc}") from exc
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as exc:
+        raise OSError(f"Could not parse DOCX {filepath}: {exc}") from exc
+
+    paragraphs = []
+    for paragraph in root.findall(".//w:p", DOCX_NAMESPACE):
+        parts = []
+        for node in paragraph.iter():
+            tag = node.tag.rsplit("}", 1)[-1]
+            if tag == "t" and node.text:
+                parts.append(node.text)
+            elif tag in {"tab"}:
+                parts.append("\t")
+            elif tag in {"br", "cr"}:
+                parts.append("\n")
+        text = "".join(parts).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n\n".join(paragraphs)
+
+
+def _read_pdf_text(filepath: Path) -> str:
+    """Extract text from a PDF using pypdf."""
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise OSError(
+            "Could not read PDF because pypdf is not installed. Reinstall mempalace with PDF support."
+        ) from exc
+
+    try:
+        reader = PdfReader(str(filepath))
+    except Exception as exc:
+        raise OSError(f"Could not read PDF {filepath}: {exc}") from exc
+
+    parts = []
+    try:
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            text = text.strip()
+            if text:
+                parts.append(text)
+    except Exception as exc:
+        raise OSError(f"Could not extract PDF text from {filepath}: {exc}") from exc
+
+    return "\n\n".join(parts)
+
+
+def _read_doc_text(filepath: Path) -> str:
+    """Best-effort text extraction from legacy .doc files."""
+    try:
+        import olefile
+    except ImportError as exc:
+        raise OSError(
+            "Could not read DOC because olefile is not installed. Reinstall mempalace with DOC support."
+        ) from exc
+
+    try:
+        with olefile.OleFileIO(str(filepath)) as doc:
+            stream_names = [
+                stream_name
+                for stream_name in doc.listdir()
+                if stream_name and stream_name[-1] in {"WordDocument", "1Table", "0Table"}
+            ]
+            stream_bytes = [doc.openstream(name).read() for name in stream_names]
+    except Exception as exc:
+        raise OSError(f"Could not read DOC {filepath}: {exc}") from exc
+
+    text = _extract_doc_text_from_streams(stream_bytes)
+    if not text:
+        raise OSError(f"Could not extract readable text from DOC {filepath}")
+    return text
+
+
+def _extract_doc_text_from_streams(streams: list[bytes]) -> str:
+    """Extract readable text runs from legacy Word OLE streams."""
+
+    def _decode_utf16le_runs(data: bytes) -> list[str]:
+        runs = []
+        current = bytearray()
+        index = 0
+        while index + 1 < len(data):
+            chunk = data[index : index + 2]
+            codepoint = int.from_bytes(chunk, "little")
+            if chunk[1] == 0 and (
+                32 <= codepoint <= 126 or chr(codepoint) in "\t\r\n"
+            ):
+                current.extend(chunk)
+            else:
+                if len(current) >= 8:
+                    runs.append(current.decode("utf-16le", errors="ignore"))
+                current.clear()
+            index += 2
+        if len(current) >= 8:
+            runs.append(current.decode("utf-16le", errors="ignore"))
+        return runs
+
+    def _decode_ascii_runs(data: bytes) -> list[str]:
+        runs = []
+        current = bytearray()
+        for value in data:
+            if 32 <= value <= 126 or value in {9, 10, 13}:
+                current.append(value)
+            else:
+                if len(current) >= 8:
+                    runs.append(current.decode("latin-1", errors="ignore"))
+                current.clear()
+        if len(current) >= 8:
+            runs.append(current.decode("latin-1", errors="ignore"))
+        return runs
+
+    seen = set()
+    parts = []
+    for stream in streams:
+        for candidate in _decode_utf16le_runs(stream) + _decode_ascii_runs(stream):
+            normalized = " ".join(candidate.replace("\r", "\n").split())
+            if len(normalized) < 4:
+                continue
+            if normalized not in seen:
+                seen.add(normalized)
+                parts.append(normalized)
+
+    return "\n\n".join(parts)
+
+
+def _read_eml_text(filepath: Path) -> str:
+    """Extract headers and visible body text from an .eml email file."""
+    try:
+        with filepath.open("rb") as handle:
+            message = BytesParser(policy=policy.default).parse(handle)
+    except Exception as exc:
+        raise OSError(f"Could not read EML {filepath}: {exc}") from exc
+
+    parts = []
+    for header in ("From", "To", "Cc", "Bcc", "Subject", "Date"):
+        value = message.get(header)
+        if value:
+            parts.append(f"{header}: {value}")
+
+    body_parts = []
+    if message.is_multipart():
+        plain_parts = []
+        html_parts = []
+        for part in message.walk():
+            if part.get_content_disposition() == "attachment":
+                continue
+            content_type = part.get_content_type()
+            if content_type == "text/plain":
+                plain_parts.append(_decode_email_part(part))
+            elif content_type == "text/html":
+                html_parts.append(_html_to_text(_decode_email_part(part)))
+        body_parts.extend(plain_parts or html_parts)
+    else:
+        content = _decode_email_part(message)
+        if message.get_content_type() == "text/html":
+            content = _html_to_text(content)
+        body_parts.append(content)
+
+    body = "\n\n".join(segment.strip() for segment in body_parts if segment and segment.strip())
+    if body:
+        parts.append(body)
+
+    return "\n\n".join(parts)
+
+
+def _decode_email_part(part) -> str:
+    """Decode one email body part into unicode text."""
+    try:
+        content = part.get_content()
+        if isinstance(content, str):
+            return content
+    except Exception:
+        pass
+
+    payload = part.get_payload(decode=True) or b""
+    charset = part.get_content_charset() or "utf-8"
+    return payload.decode(charset, errors="replace")
+
+
+def _html_to_text(content: str) -> str:
+    """Convert simple HTML email content into readable text."""
+    content = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", content)
+    content = re.sub(r"(?i)<br\s*/?>", "\n", content)
+    content = re.sub(r"(?i)</p\s*>", "\n\n", content)
+    content = re.sub(r"(?is)<[^>]+>", " ", content)
+    content = html.unescape(content)
+    lines = [line.strip() for line in content.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 # =============================================================================
 # PALACE — ChromaDB operations
 # =============================================================================
@@ -474,7 +699,7 @@ def process_file(
         return 0, None
 
     try:
-        content = filepath.read_text(encoding="utf-8", errors="replace")
+        content = read_supported_text(filepath)
     except OSError:
         return 0, None
 

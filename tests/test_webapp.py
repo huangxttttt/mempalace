@@ -1,10 +1,12 @@
 from mempalace.webapp import (
+    SUPPORTED_DIRECTORY_FORMATS,
     WebAppState,
     choose_directory_dialog,
     clear_directory_index,
     directory_to_wing,
     format_sources,
     get_directory_index_status,
+    render_page,
 )
 
 
@@ -62,3 +64,9 @@ class TestWebAppHelpers:
 
     def test_clear_directory_index_empty(self):
         assert clear_directory_index("") == 0
+
+    def test_settings_page_shows_supported_directory_formats(self):
+        rendered = render_page("settings")
+
+        assert "支持解析的文件格式" in rendered
+        assert SUPPORTED_DIRECTORY_FORMATS in rendered

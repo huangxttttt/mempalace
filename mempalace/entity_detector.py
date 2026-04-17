@@ -402,11 +402,19 @@ PROSE_EXTENSIONS = {
     ".md",
     ".rst",
     ".csv",
+    ".doc",
+    ".docx",
+    ".eml",
+    ".pdf",
 }
 
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
+    ".doc",
+    ".docx",
+    ".eml",
+    ".pdf",
     ".py",
     ".js",
     ".ts",

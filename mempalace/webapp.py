@@ -26,7 +26,7 @@ from .answerer import ask_memories, build_chat_messages, build_context_block
 from .config import MempalaceConfig
 from .entity_detector import confirm_entities, detect_entities, scan_for_detection
 from .llm_client import list_models, stream_chat_completion
-from .miner import mine
+from .miner import READABLE_EXTENSIONS, mine
 from .room_detector_local import detect_rooms_local
 
 
@@ -207,6 +207,31 @@ STATE.load_settings()
 STATE.load_chat_history()
 if not STATE.chat_sessions:
     STATE.create_session()
+
+DISPLAYABLE_DIRECTORY_EXTENSIONS = (
+    ".txt",
+    ".md",
+    ".doc",
+    ".docx",
+    ".pdf",
+    ".eml",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".html",
+    ".csv",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".sql",
+    ".toml",
+)
+SUPPORTED_DIRECTORY_FORMATS = "、".join(
+    ext.lstrip(".")
+    for ext in DISPLAYABLE_DIRECTORY_EXTENSIONS
+    if ext in READABLE_EXTENSIONS
+)
 
 
 def _escape(value: str) -> str:
@@ -432,7 +457,7 @@ def _render_status_panel() -> str:
     status_text = STATE.last_error or STATE.last_status
     return f"""
     <section class="card {status_class}">
-      <h2>状态</h2>
+      <h2>运行状态</h2>
       <pre>{html.escape(status_text)}</pre>
       <h3>日志</h3>
       <pre>{html.escape(STATE.last_logs or "暂无日志")}</pre>
@@ -444,8 +469,13 @@ def _render_chat_history() -> str:
     if not STATE.chat_history:
         return """
         <section class="empty-chat">
+          <span class="eyebrow">Ready To Ask</span>
           <h2>还没有消息</h2>
-          <p>先在设置页选择目录并配置模型，再回来开始提问。</p>
+          <p>先到设置页绑定目录并完成模型配置，然后回到这里开始提问。</p>
+          <div class="empty-chat-actions">
+            <a class="nav-link active" href="/settings-page">前往设置</a>
+            <span class="meta-pill subtle">建议先完成索引，再开始连续问答</span>
+          </div>
         </section>
         """
 
@@ -502,21 +532,57 @@ def _render_session_list() -> str:
 
 def _render_chat_page() -> str:
     settings_hint = "已完成" if STATE.current_dir and STATE.model_name else "未完成"
+    index_status = get_directory_index_status(STATE.current_wing)
+    indexed_label = "已索引" if index_status["exists"] else "未索引"
+    current_session = STATE.get_current_session() or {}
     return f"""
-    <div class="meta chat-meta">
-      <span>目录：{_escape(STATE.current_dir or "未设置")}</span>
-      <span>分区：{_escape(STATE.current_wing or "未设置")}</span>
-      <span>模型：{_escape(STATE.model_name or "未设置")}</span>
-      <span>配置：{_escape(settings_hint)}</span>
-      <span>记忆轮数：{_escape(str(STATE.max_history_turns))}</span>
-    </div>
+    <section class="chat-status-bar">
+      <div class="chat-status-copy">
+        <span class="eyebrow eyebrow-muted">MemPalace</span>
+        <h1>聊天</h1>
+      </div>
+    </section>
+
+    <section class="utility-strip compact">
+      <div class="utility-item">
+        <span>目录</span>
+        <strong>{_escape(Path(STATE.current_dir).name if STATE.current_dir else "未设置")}</strong>
+      </div>
+      <div class="utility-item">
+        <span>模型</span>
+        <strong>{_escape(STATE.model_name or "未设置")}</strong>
+      </div>
+      <div class="utility-item">
+        <span>索引</span>
+        <strong>{_escape(indexed_label)}</strong>
+      </div>
+      <div class="utility-item">
+        <span>分区</span>
+        <strong>{_escape(STATE.current_wing or "未设置")}</strong>
+      </div>
+      <div class="utility-item">
+        <span>配置</span>
+        <strong>{_escape(settings_hint)}</strong>
+      </div>
+      <div class="utility-item">
+        <span>检索</span>
+        <strong>{_escape(str(STATE.retrieval_k))}</strong>
+      </div>
+      <div class="utility-item">
+        <span>记忆</span>
+        <strong>{_escape(str(STATE.max_history_turns))}</strong>
+      </div>
+    </section>
 
     <section class="workspace">
       <aside class="session-sidebar card" id="session-sidebar">
         <div class="session-sidebar-head">
-          <h2>Session</h2>
+          <div>
+            <span class="eyebrow eyebrow-muted">Conversations</span>
+            <h2>会话列表</h2>
+          </div>
           <form method="post" action="/new-session">
-            <button type="submit">New</button>
+            <button type="submit">新建</button>
           </form>
         </div>
         <div class="session-list">
@@ -526,7 +592,14 @@ def _render_chat_page() -> str:
 
       <section class="chat-shell">
         <div class="chat-topbar">
-          <button type="button" class="sidebar-toggle" id="sidebar-toggle">Session</button>
+          <div class="chat-topbar-copy">
+            <span class="eyebrow eyebrow-muted">Workspace</span>
+            <h2>{_escape(current_session.get("title") or "新会话")}</h2>
+          </div>
+          <div class="chat-topbar-actions">
+            <span class="meta-pill subtle">目录：{_escape(Path(STATE.current_dir).name if STATE.current_dir else "未绑定")}</span>
+            <button type="button" class="sidebar-toggle" id="sidebar-toggle">会话</button>
+          </div>
         </div>
         <section class="chat-stream" id="chat-stream">
           {_render_chat_history()}
@@ -536,7 +609,7 @@ def _render_chat_page() -> str:
           <textarea
             name="question"
             id="chat-input"
-            placeholder="问一个关于当前目录的问题"
+            placeholder="输入一个关于当前目录的问题，Enter 发送，Shift + Enter 换行"
             autocomplete="off"
             rows="1"
           >{_escape(STATE.last_question)}</textarea>
@@ -555,16 +628,32 @@ def _render_settings_page() -> str:
     index_status = get_directory_index_status(STATE.current_wing)
     indexed_label = "已索引" if index_status["exists"] else "未索引"
     return f"""
-    <section class="hero settings-hero">
-      <div>
+    <section class="hero hero-panel settings-hero light-hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Configuration</span>
         <h1>设置</h1>
-        <p>在这里配置目录、索引和模型，聊天页会直接使用这些设置。</p>
+        <p>在这里配置目录、索引和模型。聊天页会直接继承这些设置，适合先建库，再进入连续问答。</p>
       </div>
-      <div class="meta settings-meta">
-        <span>仓库：{_escape(STATE.palace_path)}</span>
-        <span>目录：{_escape(STATE.current_dir or "未设置")}</span>
-        <span>模型：{_escape(STATE.model_name or "未设置")}</span>
-        <span>索引：{_escape(indexed_label)}</span>
+      <div class="hero-summary">
+        <div class="hero-summary-label">当前配置</div>
+        <dl class="summary-list">
+          <div class="summary-row">
+            <dt>仓库</dt>
+            <dd>{_escape(STATE.palace_path)}</dd>
+          </div>
+          <div class="summary-row">
+            <dt>目录</dt>
+            <dd>{_escape(STATE.current_dir or "未设置")}</dd>
+          </div>
+          <div class="summary-row">
+            <dt>模型</dt>
+            <dd>{_escape(STATE.model_name or "未设置")}</dd>
+          </div>
+          <div class="summary-row">
+            <dt>索引</dt>
+            <dd>{_escape(indexed_label)}</dd>
+          </div>
+        </dl>
       </div>
     </section>
 
@@ -593,6 +682,7 @@ def _render_settings_page() -> str:
               本地目录
               <input type="text" name="directory" value="{_escape(STATE.current_dir)}" placeholder="例如：E:\\docs 或 C:\\work\\project">
             </label>
+            <p class="field-hint">支持解析的文件格式：{_escape(SUPPORTED_DIRECTORY_FORMATS)}</p>
             <button class="secondary" type="submit">初始化并导入</button>
           </form>
           <form method="post" action="/clear-index">
@@ -622,7 +712,7 @@ def _render_settings_page() -> str:
             </label>
             <label>
               检索条数
-              <input type="number" name="retrieval_k" min="1" max="20" value="{_escape(str(STATE.retrieval_k))}">
+              <input type="number" name="retrieval_k" min="1" max="50" value="{_escape(str(STATE.retrieval_k))}">
             </label>
             <label>
               记忆轮数
@@ -828,15 +918,30 @@ def render_page(tab: str = "chat") -> str:
   <style>
     :root {{
       --bg: #f5f5f7;
+      --bg-dark: #000000;
       --panel: #ffffff;
+      --panel-dark: #1d1d1f;
       --surface: #fbfbfd;
+      --surface-dark: #272729;
       --ink: #1d1d1f;
+      --ink-dark: #ffffff;
       --muted: rgba(0, 0, 0, 0.56);
+      --muted-dark: rgba(255, 255, 255, 0.8);
       --accent: #0071e3;
+      --accent-link: #0066cc;
+      --accent-dark-link: #2997ff;
       --accent-2: #1d1d1f;
       --border: rgba(0, 0, 0, 0.08);
+      --border-dark: rgba(255, 255, 255, 0.16);
       --nav-bg: rgba(0, 0, 0, 0.8);
+      --shadow-lg: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+      --shadow-md: rgba(0, 0, 0, 0.12) 3px 5px 20px 0px;
       --error: #7e2f2f;
+      --radius-xl: 12px;
+      --radius-lg: 8px;
+      --radius-md: 5px;
+      --transition-fast: 180ms ease-out;
+      --transition-medium: 260ms ease-out;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -844,18 +949,19 @@ def render_page(tab: str = "chat") -> str:
       font-family: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
       color: var(--ink);
       background: var(--bg);
+      min-height: 100vh;
     }}
     .shell {{
-      max-width: 1440px;
+      max-width: 1400px;
       margin: 0 auto;
-      padding: 16px 20px 40px;
+      padding: 24px 20px 40px;
     }}
     .topbar {{
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 16px;
-      margin-bottom: 20px;
+      margin-bottom: 24px;
       min-height: 48px;
       padding: 0 16px;
       border-radius: 999px;
@@ -886,7 +992,17 @@ def render_page(tab: str = "chat") -> str:
       background: transparent;
       font-size: 0.88rem;
       font-weight: 400;
-      letter-spacing: -0.22px;
+      letter-spacing: -0.224px;
+      transition:
+        background var(--transition-fast),
+        border-color var(--transition-fast),
+        color var(--transition-fast),
+        transform var(--transition-fast);
+      cursor: pointer;
+    }}
+    .nav-link:hover {{
+      color: #fff;
+      border-color: rgba(255,255,255,0.32);
     }}
     .nav-link.active {{
       background: var(--accent);
@@ -895,7 +1011,7 @@ def render_page(tab: str = "chat") -> str:
     }}
     .hero {{
       display: grid;
-      gap: 12px;
+      gap: 16px;
       margin-bottom: 24px;
     }}
     h1, h2, h3 {{ margin: 0; }}
@@ -905,23 +1021,187 @@ def render_page(tab: str = "chat") -> str:
       font-weight: 600;
       line-height: 1.07;
       letter-spacing: -0.28px;
+      max-width: 14ch;
     }}
     h2 {{
       font-family: "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 1.31rem;
       font-weight: 700;
       line-height: 1.19;
-      letter-spacing: 0.23px;
+      letter-spacing: 0.231px;
     }}
     p {{
       margin: 0;
       color: var(--muted);
       line-height: 1.47;
-      letter-spacing: -0.37px;
+      letter-spacing: -0.374px;
+    }}
+    .eyebrow {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+      width: fit-content;
+      padding: 0 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 113, 227, 0.18);
+      background: rgba(0, 113, 227, 0.08);
+      color: var(--accent-link);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: -0.12px;
+      text-transform: uppercase;
+    }}
+    .eyebrow-muted {{
+      border-color: var(--border);
+      background: transparent;
+      color: var(--muted);
+    }}
+    .hero-panel {{
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      gap: 40px;
+      align-items: end;
+      padding: 40px;
+      border-radius: var(--radius-xl);
+      background: var(--bg-dark);
+      box-shadow: none;
+    }}
+    .hero-copy {{
+      display: grid;
+      gap: 14px;
+    }}
+    .hero-copy p {{
+      max-width: 62ch;
+    }}
+    .chat-status-bar {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }}
+    .chat-status-copy {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }}
+    .chat-status-copy h1 {{
+      font-size: 1.5rem;
+      line-height: 1.14;
+      letter-spacing: 0.196px;
+      max-width: none;
+    }}
+    .dark-hero {{
+      background: var(--bg-dark);
+      color: var(--ink-dark);
+    }}
+    .dark-hero p {{
+      color: rgba(255,255,255,0.8);
+    }}
+    .light-hero {{
+      background: var(--bg);
+      color: var(--ink);
+    }}
+    .light-hero .hero-summary {{
+      border-left-color: rgba(0, 0, 0, 0.12);
+    }}
+    .light-hero .hero-summary-label,
+    .light-hero .summary-row dt {{
+      color: var(--muted);
+    }}
+    .light-hero .summary-row {{
+      border-bottom-color: rgba(0, 0, 0, 0.08);
+    }}
+    .light-hero .pill-link {{
+      color: var(--accent-link);
+      border-color: var(--accent-link);
+    }}
+    .hero-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 8px;
+    }}
+    .hero-summary {{
+      align-self: stretch;
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      padding-left: 32px;
+      border-left: 1px solid rgba(255, 255, 255, 0.18);
+    }}
+    .hero-summary-label {{
+      font-size: 0.75rem;
+      line-height: 1.33;
+      letter-spacing: -0.12px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.72);
+    }}
+    .summary-list {{
+      margin: 0;
+      display: grid;
+      gap: 14px;
+    }}
+    .summary-row {{
+      display: grid;
+      gap: 6px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }}
+    .summary-row dt {{
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 0.75rem;
+      line-height: 1.33;
+      letter-spacing: -0.12px;
+    }}
+    .summary-row dd {{
+      margin: 0;
+      color: inherit;
+      font-size: 1.06rem;
+      line-height: 1.47;
+      letter-spacing: -0.374px;
+      word-break: break-word;
+    }}
+    .pill-link {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 18px;
+      border-radius: 980px;
+      border: 1px solid var(--accent-link);
+      color: var(--accent-link);
+      text-decoration: none;
+      font-size: 0.88rem;
+      line-height: 1.43;
+      letter-spacing: -0.224px;
+      transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+    }}
+    .pill-link:hover {{
+      text-decoration: underline;
+    }}
+    .pill-link.filled {{
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      text-decoration: none;
+    }}
+    .dark-hero .pill-link {{
+      color: var(--accent-dark-link);
+      border-color: rgba(255, 255, 255, 0.32);
+    }}
+    .dark-hero .pill-link.filled {{
+      color: white;
+      border-color: var(--accent);
     }}
     .settings-stack {{
       display: grid;
-      gap: 24px;
+      gap: 0;
+      background: var(--panel);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
     }}
     .settings-section {{
       display: grid;
@@ -929,20 +1209,23 @@ def render_page(tab: str = "chat") -> str:
       gap: 32px;
       align-items: start;
       padding: 40px;
-      border-radius: 28px;
+      border-bottom: 1px solid var(--border);
+    }}
+    .settings-section:last-child {{
+      border-bottom: 0;
     }}
     .light-section {{
       background: var(--panel);
-      box-shadow: rgba(0, 0, 0, 0.12) 3px 5px 30px 0px;
+      box-shadow: none;
     }}
     .dark-section {{
-      background: #000000;
+      background: var(--bg-dark);
       color: #ffffff;
-      box-shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+      box-shadow: none;
     }}
     .section-copy {{
       display: grid;
-      gap: 12px;
+      gap: 14px;
       align-content: start;
     }}
     .section-copy p {{
@@ -955,12 +1238,12 @@ def render_page(tab: str = "chat") -> str:
     .settings-panel {{
       display: grid;
       gap: 16px;
-      padding: 24px;
-      border-radius: 20px;
-      background: var(--surface);
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
     }}
     .dark-panel {{
-      background: #1d1d1f;
+      background: transparent;
     }}
     .workspace {{
       display: grid;
@@ -973,29 +1256,46 @@ def render_page(tab: str = "chat") -> str:
     }}
     .card {{
       background: var(--panel);
-      border: 0;
-      border-radius: 20px;
+      border-radius: var(--radius-lg);
       padding: 24px;
-      box-shadow: rgba(0, 0, 0, 0.12) 3px 5px 30px 0px;
+      box-shadow: var(--shadow-lg);
     }}
     form {{ display: grid; gap: 12px; }}
     label {{
       display: grid;
       gap: 6px;
       font-size: 0.88rem;
-      line-height: 1.43;
-      letter-spacing: -0.22px;
+      line-height: 1.5;
+      letter-spacing: 0;
       color: var(--muted);
     }}
     input,
     textarea {{
       width: 100%;
-      border-radius: 12px;
+      border-radius: 11px;
       border: 1px solid var(--border);
       padding: 12px 14px;
       font: inherit;
       color: var(--ink);
       background: white;
+      transition:
+        border-color var(--transition-fast),
+        box-shadow var(--transition-fast),
+        background var(--transition-fast);
+    }}
+    input::placeholder,
+    textarea::placeholder {{
+      color: #7f8ea3;
+    }}
+    input:focus-visible,
+    textarea:focus-visible,
+    button:focus-visible,
+    .nav-link:focus-visible,
+    .clear-link:focus-visible,
+    summary:focus-visible {{
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
     }}
     textarea {{
       resize: vertical;
@@ -1005,7 +1305,7 @@ def render_page(tab: str = "chat") -> str:
     button {{
       border: 1px solid transparent;
       border-radius: 999px;
-      padding: 8px 16px;
+      padding: 8px 18px;
       font: inherit;
       font-size: 1.06rem;
       font-weight: 400;
@@ -1013,9 +1313,19 @@ def render_page(tab: str = "chat") -> str:
       color: white;
       background: var(--accent);
       cursor: pointer;
+      transition:
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast),
+        background var(--transition-fast),
+        border-color var(--transition-fast);
+      box-shadow: none;
+    }}
+    button:hover {{
+      background: #0077ed;
     }}
     button.secondary {{
       background: var(--accent-2);
+      color: white;
     }}
     pre {{
       margin: 0;
@@ -1038,6 +1348,58 @@ def render_page(tab: str = "chat") -> str:
     .chat-meta {{
       margin-bottom: 20px;
     }}
+    .utility-strip {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0;
+      margin-bottom: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }}
+    .utility-strip.compact {{
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      margin-bottom: 16px;
+      box-shadow: none;
+      border: 1px solid var(--border);
+    }}
+    .utility-item {{
+      display: grid;
+      gap: 8px;
+      padding: 18px 20px;
+      border-right: 1px solid var(--border);
+    }}
+    .utility-item:last-child {{
+      border-right: 0;
+    }}
+    .utility-item span {{
+      color: var(--muted);
+      font-size: 0.75rem;
+      line-height: 1.33;
+      letter-spacing: -0.12px;
+      text-transform: uppercase;
+    }}
+    .utility-item strong {{
+      color: var(--ink);
+      font-size: 1rem;
+      line-height: 1.19;
+      letter-spacing: 0.231px;
+    }}
+    .meta-pill {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fafafc;
+      color: rgba(0, 0, 0, 0.8);
+    }}
+    .meta-pill.subtle {{
+      color: var(--muted);
+      background: transparent;
+    }}
     .settings-meta {{
       margin-top: 4px;
     }}
@@ -1056,9 +1418,9 @@ def render_page(tab: str = "chat") -> str:
       min-height: calc(100vh - 120px);
       grid-template-rows: auto minmax(0, 1fr) auto;
       background: var(--panel);
-      border-radius: 24px;
+      border-radius: var(--radius-xl);
       padding: 20px;
-      box-shadow: rgba(0, 0, 0, 0.12) 3px 5px 30px 0px;
+      box-shadow: none;
     }}
     .session-sidebar {{
       position: sticky;
@@ -1071,7 +1433,7 @@ def render_page(tab: str = "chat") -> str:
       transition: opacity 160ms ease, transform 160ms ease, padding 160ms ease, border-width 160ms ease;
       background: #000000;
       color: #ffffff;
-      box-shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+      box-shadow: var(--shadow-lg);
     }}
     .workspace.sidebar-collapsed .session-sidebar {{
       opacity: 0;
@@ -1086,7 +1448,7 @@ def render_page(tab: str = "chat") -> str:
       justify-content: space-between;
       align-items: center;
       gap: 10px;
-      padding-bottom: 6px;
+      padding-bottom: 10px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     }}
     .session-sidebar-head h2 {{
@@ -1098,8 +1460,21 @@ def render_page(tab: str = "chat") -> str:
     }}
     .chat-topbar {{
       display: flex;
-      justify-content: flex-start;
+      justify-content: space-between;
       align-items: center;
+      gap: 16px;
+      padding: 8px 4px 18px;
+      border-bottom: 1px solid var(--border);
+    }}
+    .chat-topbar-copy {{
+      display: grid;
+      gap: 8px;
+    }}
+    .chat-topbar-actions {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }}
     .sidebar-toggle {{
       min-height: 42px;
@@ -1109,6 +1484,7 @@ def render_page(tab: str = "chat") -> str:
       background: var(--surface);
       color: var(--ink);
       font-weight: 400;
+      box-shadow: none;
     }}
     .session-list {{
       overflow-y: auto;
@@ -1134,9 +1510,10 @@ def render_page(tab: str = "chat") -> str:
       border-radius: 16px;
       padding: 14px;
       background: rgba(255, 255, 255, 0.04);
-      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
       width: 100%;
       text-align: left;
+      box-shadow: none;
     }}
     .session-delete-form {{
       display: flex;
@@ -1151,26 +1528,27 @@ def render_page(tab: str = "chat") -> str:
       color: rgba(255, 255, 255, 0.72);
       font-size: 1.1rem;
       line-height: 1;
+      box-shadow: none;
     }}
     .session-delete:hover {{
       color: #ffffff;
       border-color: rgba(255, 255, 255, 0.24);
+      background: rgba(255, 255, 255, 0.08);
     }}
     .session-link:hover {{
-      transform: translateY(-1px);
+      transform: none;
       border-color: rgba(255, 255, 255, 0.24);
       background: rgba(255, 255, 255, 0.08);
     }}
     .session-link.active {{
       border-color: var(--accent);
       background: rgba(0, 113, 227, 0.18);
-      box-shadow: none;
     }}
     .session-title {{
-      font-size: 1.06rem;
+      font-size: 1rem;
       font-weight: 600;
-      line-height: 1.24;
-      letter-spacing: -0.37px;
+      line-height: 1.35;
+      letter-spacing: -0.01em;
       margin-bottom: 6px;
     }}
     .session-meta {{
@@ -1181,23 +1559,23 @@ def render_page(tab: str = "chat") -> str:
     }}
     .chat-stream {{
       display: grid;
-      gap: 14px;
+      gap: 16px;
       align-content: start;
       min-height: 0;
       max-height: calc(100vh - 280px);
       overflow-y: auto;
-      padding: 24px;
-      border-radius: 20px;
-      border: 1px solid var(--border);
-      background: var(--bg);
+      padding: 8px 0;
+      border-radius: var(--radius-lg);
+      border: 0;
+      background: transparent;
       box-shadow: none;
     }}
     .bubble {{
       max-width: min(860px, 100%);
-      border-radius: 18px;
+      border-radius: 8px;
       padding: 16px 18px;
-      box-shadow: rgba(0, 0, 0, 0.08) 0px 8px 24px 0px;
-      border: 0;
+      box-shadow: var(--shadow-md);
+      border: 1px solid transparent;
     }}
     .user-bubble {{
       justify-self: end;
@@ -1206,7 +1584,8 @@ def render_page(tab: str = "chat") -> str:
     }}
     .assistant-bubble {{
       justify-self: start;
-      background: var(--panel);
+      background: white;
+      border-color: transparent;
     }}
     .bubble-role {{
       margin-bottom: 6px;
@@ -1234,6 +1613,7 @@ def render_page(tab: str = "chat") -> str:
     }}
     .markdown-body {{
       line-height: 1.65;
+      color: var(--ink);
     }}
     .markdown-body p,
     .markdown-body ul,
@@ -1265,17 +1645,20 @@ def render_page(tab: str = "chat") -> str:
       background: transparent;
     }}
     .markdown-body a {{
-      color: var(--accent);
+      color: var(--accent-link);
     }}
     .composer {{
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 12px;
       align-items: end;
-      padding: 16px;
-      border-radius: 20px;
-      background: var(--surface);
-      border: 1px solid var(--border);
+      padding: 16px 0 0;
+      border-radius: var(--radius-lg);
+      background: transparent;
+      border-top: 1px solid var(--border);
+      border-left: 0;
+      border-right: 0;
+      border-bottom: 0;
       box-shadow: none;
     }}
     .composer input[disabled],
@@ -1307,21 +1690,43 @@ def render_page(tab: str = "chat") -> str:
       background: white;
       font-weight: 400;
       white-space: nowrap;
+      transition:
+        border-color var(--transition-fast),
+        color var(--transition-fast),
+        background var(--transition-fast);
     }}
     .clear-link:hover {{
       color: var(--ink);
       border-color: rgba(0, 113, 227, 0.35);
     }}
     .empty-chat {{
+      display: grid;
+      justify-items: center;
+      gap: 14px;
       padding: 56px 28px;
       border: 1px dashed var(--border);
-      border-radius: 20px;
+      border-radius: 12px;
       color: var(--muted);
       background: var(--surface);
       text-align: center;
     }}
+    .empty-chat h2 {{
+      font-size: 1.6rem;
+    }}
+    .empty-chat-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }}
     .details-panel {{
       margin-top: 14px;
+    }}
+    .field-hint {{
+      margin: -4px 0 14px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
     }}
     .details-panel summary {{
       cursor: pointer;
@@ -1359,12 +1764,13 @@ def render_page(tab: str = "chat") -> str:
     .stat-chip strong {{
       font-size: 0.88rem;
       font-weight: 600;
-      letter-spacing: -0.22px;
+      letter-spacing: 0;
     }}
     .stat-label {{
       color: var(--muted);
       font-size: 0.75rem;
-      letter-spacing: -0.12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
     }}
     .settings-status {{
       margin-top: 24px;
@@ -1392,18 +1798,50 @@ def render_page(tab: str = "chat") -> str:
       background: transparent;
       border-color: rgba(255, 255, 255, 0.32);
       color: #ffffff;
+      box-shadow: none;
+    }}
+    .ghost-light:hover {{
+      background: rgba(255, 255, 255, 0.06);
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      *,
+      *::before,
+      *::after {{
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }}
     }}
     @media (max-width: 640px) {{
-      .shell {{ padding: 20px 14px 36px; }}
-      .card {{ border-radius: 14px; }}
+      .shell {{ padding: 18px 14px 30px; }}
+      .card {{ border-radius: 16px; }}
       .topbar {{
         align-items: flex-start;
         flex-direction: column;
         border-radius: 18px;
         padding: 10px 14px;
       }}
+      .hero-panel {{ grid-template-columns: 1fr; padding: 22px; gap: 20px; }}
+      .chat-status-bar {{
+        align-items: flex-start;
+        flex-direction: column;
+      }}
+      .hero-summary {{
+        padding-left: 0;
+        padding-top: 12px;
+        border-left: 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.18);
+      }}
+      .light-hero .hero-summary {{
+        border-top-color: rgba(0, 0, 0, 0.12);
+      }}
+      h1 {{ max-width: none; font-size: clamp(2rem, 10vw, 2.8rem); }}
+      .utility-strip {{ grid-template-columns: 1fr 1fr; }}
+      .utility-strip.compact {{ grid-template-columns: 1fr 1fr; }}
       .composer {{ grid-template-columns: 1fr; }}
-      .composer-actions {{ grid-template-columns: 1fr 1fr; grid-auto-flow: row; }}
+      .composer-actions {{ grid-template-columns: 1fr; grid-auto-flow: row; justify-content: stretch; }}
+      .chat-topbar {{ align-items: flex-start; flex-direction: column; }}
+      .chat-topbar-actions {{ width: 100%; justify-content: space-between; }}
       .workspace {{ grid-template-columns: 1fr; }}
       .settings-section {{ grid-template-columns: 1fr; padding: 24px; gap: 20px; }}
       .session-sidebar {{ position: static; max-height: none; }}
@@ -1414,8 +1852,10 @@ def render_page(tab: str = "chat") -> str:
         transform: none;
         padding: 18px;
         border-width: 1px;
-        box-shadow: 0 12px 30px rgba(43, 38, 30, 0.08);
+        box-shadow: var(--shadow-md);
       }}
+      .chat-stream {{ max-height: none; min-height: 360px; padding: 18px; }}
+      .meta-pill {{ width: 100%; justify-content: center; }}
     }}
   </style>
 </head>
@@ -1553,7 +1993,7 @@ class MemPalaceHandler(BaseHTTPRequestHandler):
                 STATE.model_api_key = (form.get("api_key") or [""])[0].strip()
                 STATE.model_name = (form.get("model") or [""])[0].strip()
                 retrieval_k_raw = (form.get("retrieval_k") or [str(STATE.retrieval_k)])[0].strip()
-                STATE.retrieval_k = max(1, min(20, int(retrieval_k_raw or "5")))
+                STATE.retrieval_k = max(1, min(50, int(retrieval_k_raw or "5")))
                 history_raw = (form.get("max_history_turns") or [str(STATE.max_history_turns)])[0].strip()
                 STATE.max_history_turns = max(0, min(12, int(history_raw or "4")))
                 STATE.save_settings()
